@@ -20,7 +20,7 @@ st.set_page_config(
 st.markdown("""
 <style>
 /* スマホ対応: フォントサイズと余白を調整 */
-.block-container { padding: 0.5rem 0.5rem 2rem; }
+.block-container { padding: 4.5rem 0.5rem 2rem !important; }
 [data-testid="stMetricValue"] { font-size: 1.1rem; }
 [data-testid="stMetricDelta"] { font-size: 0.8rem; }
 thead tr th { background: #1e1e2e !important; }
@@ -66,12 +66,12 @@ def load_ticker_history(ticker: str, days: int = 30) -> pd.DataFrame:
     df = pd.read_sql("""
         SELECT * FROM quotes
         WHERE ticker = ?
-          AND fetched_at >= datetime('now', ?)
+          AND fetched_at >= datetime('now', '+9 hours', ?)
         ORDER BY fetched_at ASC
     """, conn, params=(ticker, f"-{days} days"))
     conn.close()
     if not df.empty:
-        df["fetched_at"] = pd.to_datetime(df["fetched_at"]) + pd.Timedelta(hours=9)
+        df["fetched_at"] = pd.to_datetime(df["fetched_at"])
     return df
 
 
@@ -171,10 +171,9 @@ if df_latest.empty:
     st.warning("データがありません。monitor.py を実行してデータを蓄積してください。")
     st.stop()
 
-# 最終更新時刻 (JST)
+# 最終更新時刻 (JST保存済み)
 if "fetched_at" in df_latest.columns:
-    last_update_jst = pd.to_datetime(df_latest["fetched_at"].max()) + pd.Timedelta(hours=9)
-    last_update_str = last_update_jst.strftime("%Y-%m-%d %H:%M JST")
+    last_update_str = pd.to_datetime(df_latest["fetched_at"].max()).strftime("%Y-%m-%d %H:%M JST")
 else:
     last_update_str = "-"
 st.caption(f"最終更新: {last_update_str}")

@@ -2,7 +2,9 @@
 import json
 import sqlite3
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+JST = timezone(timedelta(hours=9))
 
 DB_PATH = Path(__file__).parent / "data.db"
 
@@ -40,7 +42,7 @@ def init_db():
 
 def save_entries(entries: list[dict]):
     init_db()
-    now = datetime.now().isoformat(timespec="seconds")
+    now = datetime.now(JST).strftime("%Y-%m-%dT%H:%M:%S")
     rows = []
     for e in entries:
         if "error" in e:
@@ -73,7 +75,7 @@ def load_history(ticker: str, days: int = 30) -> list[dict]:
         rows = conn.execute("""
             SELECT * FROM quotes
             WHERE ticker = ?
-              AND fetched_at >= datetime('now', ?)
+              AND fetched_at >= datetime('now', '+9 hours', ?)
             ORDER BY fetched_at ASC
         """, (ticker, f"-{days} days")).fetchall()
     return [dict(r) for r in rows]
