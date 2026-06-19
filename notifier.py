@@ -6,7 +6,9 @@ import json
 import os
 import urllib.request
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+JST = timezone(timedelta(hours=9))
 
 from storage import load_history
 
@@ -91,7 +93,7 @@ def _predict_buy(entry: dict) -> list[str]:
 
 def notify_intraday(entries: list[dict]) -> int:
     """急騰・急落・出来高サージ銘柄を通知。送信件数を返す。"""
-    blocks = [_header(f"📈 場中アラート  {datetime.now().strftime('%m/%d %H:%M')}")]
+    blocks = [_header(f"📈 場中アラート  {datetime.now(JST).strftime('%m/%d %H:%M')} JST")]
     count = 0
 
     for e in entries:
@@ -145,12 +147,12 @@ def notify_daily(entries: list[dict], watchlist: list[dict]) -> int:
 
     if not crosses_gc and not crosses_dc and not predictions:
         _post({"blocks": [
-            _header(f"🌙 夜間レポート  {datetime.now().strftime('%Y-%m-%d')}"),
+            _header(f"🌙 夜間レポート  {datetime.now(JST).strftime('%Y-%m-%d')}"),
             _section("本日の特記シグナルなし"),
         ]})
         return 0
 
-    blocks = [_header(f"🌙 夜間レポート  {datetime.now().strftime('%Y-%m-%d')}")]
+    blocks = [_header(f"🌙 夜間レポート  {datetime.now(JST).strftime('%Y-%m-%d')}")]
 
     if crosses_gc:
         blocks += [_divider(), _section("*ゴールデンクロス検出*\n" + "\n".join(crosses_gc))]
