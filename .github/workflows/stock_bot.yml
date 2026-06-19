@@ -1,0 +1,76 @@
+name: Stock Monitor Bot
+
+on:
+  schedule:
+    # 場中: 平日 9:00〜14:45 JST (0:00〜5:45 UTC) を15分おき
+    - cron: '0,15,30,45 0-5 * * 1-5'
+    # 場中最終: 15:15 JST = 6:15 UTC
+    - cron: '15 6 * * 1-5'
+    # 夜間: 19:00 JST = 10:00 UTC
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '実行モード (intraday=場中 / daily=夜間)'
+        required: false
+        default: 'intraday'
+        type: choice
+        options:
+          - intraday
+          - daily
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine mode from schedule time
+        id: mode
+        run: |
+          # workflow_dispatch の場合は手動指定を優先
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ inputs.mode }}" >> $GITHUB_OUTPUT
+          else
+            HOUR=$(date -u +%H)
+            # UTC 10:00 (JST 19:00) は夜間モード、それ以外は場中モード
+            if [ "$HOUR" -ge 10 ]; then
+              echo "mode=daily" >> $GITHUB_OUTPUT
+            else
+              echo "mode=intraday" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Run stock monitor
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          echo "Running in mode: ${{ steps.mode.outputs.mode }}"
+          python monitor.py --mode ${{ steps.mode.outputs.mode }}
+
+      - name: Commit and push updated data.db
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.db
+          # 変更がない場合はコミットしない
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "chore: update stock data $(date -u +'%Y-%m-%d %H:%M UTC') [skip ci]"
+          git push

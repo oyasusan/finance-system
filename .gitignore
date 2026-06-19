@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# 仮想環境
+.venv/
+venv/
+env/
+
+# Claude Code
+.claude/
+
+# ローカル生成チャート（Streamlit側で動的生成）
+charts/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ローカル設定
+*.local
+.env
