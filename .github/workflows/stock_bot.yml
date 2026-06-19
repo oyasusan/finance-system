@@ -1,13 +1,6 @@
 name: Stock Monitor Bot
 
 on:
-  schedule:
-    # 場中: 平日 9:00〜14:45 JST (0:00〜5:45 UTC) を15分おき
-    - cron: '0,15,30,45 0-5 * * 1-5'
-    # 場中最終: 15:15 JST = 6:15 UTC
-    - cron: '15 6 * * 1-5'
-    # 夜間: 19:00 JST = 10:00 UTC
-    - cron: '0 10 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:
