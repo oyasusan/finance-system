@@ -191,33 +191,107 @@ def notify_intraday(entries: list[dict]) -> int:
 # ─── 夜間通知 ─────────────────────────────────────────────────────
 
 def notify_daily(entries: list[dict], watchlist: list[dict]) -> int:
-    """ゴールデンクロス・デッドクロス・複合シグナル予測を通知。送信件数を返す。"""
-    crosses_gc, crosses_dc, predictions = [], [], []
-
-    for e in entries:
-        name = e.get("name", e["ticker"])
-        code = e["ticker"].replace(".T", "")
-        cross = _detect_cross(e["ticker"])
-        if cross == "golden":
-            crosses_gc.append(f"🟡 *{name}* `{code}`  MA5がMA25を上抜け")
-        elif cross == "dead":
-            crosses_dc.append(f"⚫ *{name}* `{code}`  MA5がMA25を下抜け")
-
-        pred = _predict_buy(e)
-        if pred:
-            predictions.append(f"⭐ *{name}* `{code}`\n　　{' / '.join(pred)}")
-
-    if not crosses_gc and not crosses_dc and not predictions:
+    """夜間レポートを Slack に送信する。4セクション構成。"""
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    valid = [e for e in entries if "error" not in e]
+    if not valid:
         return 0
 
-    blocks = [_header(f"🌙 夜間レポート  {datetime.now(JST).strftime('%Y-%m-%d')}")]
+    blocks = [_header(f"🌙 夜間レポート  {today}")]
 
+    # ── ① 市況サマリー ───────────────────────────────────────────
+    rising  = [e for e in valid if (e.get("change_pct") or 0) >  0.5]
+    falling = [e for e in valid if (e.get("change_pct") or 0) < -0.5]
+    flat    = [e for e in valid if abs(e.get("change_pct") or 0) <= 0.5]
+    avg_chg = sum(e.get("change_pct") or 0 for e in valid) / len(valid)
+
+    top_up   = sorted(rising,  key=lambda e: e.get("change_pct") or 0, reverse=True)[:3]
+    top_down = sorted(falling, key=lambda e: e.get("change_pct") or 0)[:3]
+
+    lines = [
+        f"上昇 *{len(rising)}* 件  /  下落 *{len(falling)}* 件  /  横ばい *{len(flat)}* 件"
+        f"　　平均変化率: *{avg_chg:+.2f}%*",
+    ]
+    if top_up:
+        items = "　".join(
+            f"`{e['ticker'].replace('.T','')}` {e.get('change_pct',0):+.1f}%" for e in top_up
+        )
+        lines.append(f"🔺 上昇 TOP: {items}")
+    if top_down:
+        items = "　".join(
+            f"`{e['ticker'].replace('.T','')}` {e.get('change_pct',0):+.1f}%" for e in top_down
+        )
+        lines.append(f"🔻 下落 TOP: {items}")
+
+    blocks += [_divider(), _section("*① 市況サマリー*\n" + "\n".join(lines))]
+
+    # ── ② シグナルハイライト ────────────────────────────────────
+    strong_buys  = [e for e in valid if e.get("signal") and e["signal"].level == "strong_buy"]
+    strong_sells = [e for e in valid if e.get("signal") and e["signal"].level == "strong_sell"]
+
+    if strong_buys or strong_sells:
+        sig_lines = []
+        for e in strong_buys:
+            code = e["ticker"].replace(".T", "")
+            sig_lines.append(
+                f"🟢 *{e.get('name', code)}* `{code}`"
+                f"  {e.get('change_pct', 0):+.1f}%  RSI {e.get('rsi') or '-'}"
+            )
+        for e in strong_sells:
+            code = e["ticker"].replace(".T", "")
+            sig_lines.append(
+                f"🔴 *{e.get('name', code)}* `{code}`"
+                f"  {e.get('change_pct', 0):+.1f}%  RSI {e.get('rsi') or '-'}"
+            )
+        blocks += [_divider(), _section("*② シグナルハイライト*\n" + "\n".join(sig_lines))]
+
+    # ── ③ テクニカルイベント ────────────────────────────────────
+    crosses_gc, crosses_dc, rsi_hot, rsi_cold = [], [], [], []
+
+    for e in valid:
+        code = e["ticker"].replace(".T", "")
+        name = e.get("name", code)
+        cross = _detect_cross(e["ticker"])
+        if cross == "golden":
+            crosses_gc.append(f"🟡 *{name}* `{code}`")
+        elif cross == "dead":
+            crosses_dc.append(f"⚫ *{name}* `{code}`")
+        rsi = e.get("rsi")
+        if rsi is not None:
+            if rsi >= 75:
+                rsi_hot.append(f"`{code}` {rsi:.0f}")
+            elif rsi <= 25:
+                rsi_cold.append(f"`{code}` {rsi:.0f}")
+
+    tech_lines = []
     if crosses_gc:
-        blocks += [_divider(), _section("*ゴールデンクロス検出*\n" + "\n".join(crosses_gc))]
+        tech_lines.append("GC（ゴールデンクロス）: " + "  ".join(crosses_gc))
     if crosses_dc:
-        blocks += [_divider(), _section("*デッドクロス検出*\n" + "\n".join(crosses_dc))]
+        tech_lines.append("DC（デッドクロス）: " + "  ".join(crosses_dc))
+    if rsi_hot:
+        tech_lines.append("RSI 過熱（≥75）: " + "  ".join(rsi_hot))
+    if rsi_cold:
+        tech_lines.append("RSI 売られすぎ（≤25）: " + "  ".join(rsi_cold))
+
+    if tech_lines:
+        blocks += [_divider(), _section("*③ テクニカルイベント*\n" + "\n".join(tech_lines))]
+    else:
+        blocks += [_divider(), _section("*③ テクニカルイベント*\n特記なし")]
+
+    # ── ④ 翌日注目候補 ──────────────────────────────────────────
+    predictions = []
+    for e in valid:
+        pred = _predict_buy(e)
+        if pred:
+            code = e["ticker"].replace(".T", "")
+            predictions.append(
+                f"⭐ *{e.get('name', code)}* `{code}`  {' / '.join(pred)}"
+            )
+
     if predictions:
-        blocks += [_divider(), _section("*翌日上昇予測（複合シグナル）*\n" + "\n".join(predictions))]
+        blocks += [_divider(), _section("*④ 翌日注目候補*\n" + "\n".join(predictions))]
+    else:
+        blocks += [_divider(), _section("*④ 翌日注目候補*\n候補なし")]
 
     _post({"blocks": blocks})
-    return len(crosses_gc) + len(crosses_dc) + len(predictions)
+    return len(valid)
