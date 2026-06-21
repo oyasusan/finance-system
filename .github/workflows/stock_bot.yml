@@ -54,6 +54,7 @@ jobs:
       - name: Run stock monitor
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
         run: |
           echo "Running in mode: ${{ steps.mode.outputs.mode }}"
           python monitor.py --mode ${{ steps.mode.outputs.mode }}

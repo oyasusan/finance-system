@@ -7,24 +7,69 @@ import os
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 JST = timezone(timedelta(hours=9))
 
 from storage import load_history
 
-WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
+WEBHOOK_URL       = os.environ.get("SLACK_WEBHOOK_URL", "")
+ALERT_WEBHOOK_URL = os.environ.get("SLACK_ALERT_WEBHOOK_URL", "")
+
+_ALERT_STATE_PATH = Path(__file__).parent / "alert_state.json"
+
+# シグナルレベルの重大度ランク（大きいほど重大）
+_LEVEL_RANK: dict[str, int] = {
+    "watch":      0,
+    "buy":        1,
+    "sell":       1,
+    "strong_buy": 2,
+    "strong_sell":2,
+}
+
+
+def _load_alert_state(today: str) -> dict:
+    if _ALERT_STATE_PATH.exists():
+        try:
+            state = json.loads(_ALERT_STATE_PATH.read_text(encoding="utf-8"))
+            if state.get("date") == today:
+                return state
+        except Exception:
+            pass
+    return {"date": today, "sent": {}}
+
+
+def _save_alert_state(state: dict) -> None:
+    _ALERT_STATE_PATH.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _should_notify(ticker: str, new_level: str, sent: dict[str, str]) -> bool:
+    """当日未送信、またはシグナルレベルが昇格・方向転換した場合に True を返す。"""
+    if ticker not in sent:
+        return True
+    prev = sent[ticker]
+    # 買い⇔売りの方向転換（watch 除く）
+    prev_buy = prev in ("buy", "strong_buy")
+    new_buy  = new_level in ("buy", "strong_buy")
+    if new_level != "watch" and prev_buy != new_buy:
+        return True
+    # 同方向でランク昇格
+    return _LEVEL_RANK.get(new_level, 0) > _LEVEL_RANK.get(prev, 0)
 
 
 # ─── Slack 送信 ────────────────────────────────────────────────────
 
-def _post(payload: dict) -> bool:
-    if not WEBHOOK_URL:
-        print("[notifier] SLACK_WEBHOOK_URL が未設定のため通知をスキップ")
+def _post(payload: dict, url: str = "") -> bool:
+    target = url or WEBHOOK_URL
+    if not target:
+        print("[notifier] Webhook URL が未設定のため通知をスキップ")
         return False
     try:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
-            WEBHOOK_URL, data=data,
+            target, data=data,
             headers={"Content-Type": "application/json; charset=utf-8"},
         )
         urllib.request.urlopen(req, timeout=10)
@@ -92,9 +137,17 @@ def _predict_buy(entry: dict) -> list[str]:
 # ─── 場中通知 ─────────────────────────────────────────────────────
 
 def notify_intraday(entries: list[dict]) -> int:
-    """急騰・急落・出来高サージ銘柄を通知。送信件数を返す。"""
+    """急騰・急落・出来高サージ銘柄を通知。送信件数を返す。
+    当日に同シグナルレベル以下の通知済み銘柄はスキップし、
+    レベル昇格または方向転換（買い⇔売り）のときのみ再通知する。
+    """
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    state = _load_alert_state(today)
+    sent  = state["sent"]
+
     blocks = [_header(f"📈 場中アラート  {datetime.now(JST).strftime('%m/%d %H:%M')} JST")]
     count = 0
+    to_update: dict[str, str] = {}
 
     for e in entries:
         sig = e.get("signal")
@@ -104,25 +157,34 @@ def notify_intraday(entries: list[dict]) -> int:
         if not intraday:
             continue
 
-        emoji = "🚀" if "buy" in sig.level else "🔻"
+        ticker = e["ticker"]
+        if not _should_notify(ticker, sig.level, sent):
+            continue
+
+        emoji  = "🚀" if "buy" in sig.level else "🔻"
         change = e.get("change_pct", 0)
-        vol = e.get("volume_ratio", 0)
-        price = e.get("current", 0)
-        name = e.get("name", e["ticker"])
-        code = e["ticker"].replace(".T", "")
+        vol    = e.get("volume_ratio", 0)
+        price  = e.get("current", 0)
+        name   = e.get("name", ticker)
+        code   = ticker.replace(".T", "")
+        # 再通知の場合はレベル昇格ラベルを付加
+        label  = "  ⬆ レベル上昇" if ticker in sent else ""
 
         blocks.append(_divider())
         blocks.append(_section(
-            f"{emoji} *{name}*  `{code}`\n"
+            f"{emoji} *{name}*  `{code}`{label}\n"
             f"前日比: *{change:+.2f}%*  |  出来高: *{vol:.1f}倍*  |  現在値: *{price:,.0f}円*\n"
             f"理由: {' / '.join(intraday)}"
         ))
+        to_update[ticker] = sig.level
         count += 1
 
     if count == 0:
         return 0
 
-    _post({"blocks": blocks})
+    _post({"blocks": blocks}, url=ALERT_WEBHOOK_URL)
+    sent.update(to_update)
+    _save_alert_state(state)
     return count
 
 
@@ -146,10 +208,6 @@ def notify_daily(entries: list[dict], watchlist: list[dict]) -> int:
             predictions.append(f"⭐ *{name}* `{code}`\n　　{' / '.join(pred)}")
 
     if not crosses_gc and not crosses_dc and not predictions:
-        _post({"blocks": [
-            _header(f"🌙 夜間レポート  {datetime.now(JST).strftime('%Y-%m-%d')}"),
-            _section("本日の特記シグナルなし"),
-        ]})
         return 0
 
     blocks = [_header(f"🌙 夜間レポート  {datetime.now(JST).strftime('%Y-%m-%d')}")]
