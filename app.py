@@ -23,14 +23,32 @@ st.markdown("""
 .block-container { padding: 4.5rem 0.5rem 2rem !important; }
 [data-testid="stMetricValue"] { font-size: 1.1rem; }
 [data-testid="stMetricDelta"] { font-size: 0.8rem; }
-thead tr th { background: #1e1e2e !important; }
 /* タイトル折り返し */
 h1 { font-size: 1.4rem !important; white-space: normal !important; word-break: break-word; }
+/* カードの余白を小さく */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border-color: #333355 !important;
+    border-radius: 8px !important;
+    padding: 6px 10px !important;
+    margin-bottom: 4px !important;
+}
+/* お気に入りボタンをコンパクトに */
+[data-testid="stVerticalBlockBorderWrapper"] button {
+    padding: 0 6px !important;
+    min-height: 28px !important;
+    font-size: 1rem !important;
+}
+/* ファボクイックボタン */
+.fav-quick button {
+    border: 1px solid #444466 !important;
+    border-radius: 6px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
-DB_PATH   = Path(__file__).parent / "data.db"
-WATCH_PATH = Path(__file__).parent / "watchlist.json"
+DB_PATH        = Path(__file__).parent / "data.db"
+WATCH_PATH     = Path(__file__).parent / "watchlist.json"
+FAVORITES_PATH = Path(__file__).parent / "favorites.json"
 
 # ─── データ読み込み ────────────────────────────────────────────────
 @st.cache_data(ttl=60)
@@ -105,6 +123,25 @@ def fmt_cap(v) -> str:
     return f"{v/1e4:.0f}万"
 
 
+# ─── お気に入り管理 ────────────────────────────────────────────────
+def load_favorites() -> set:
+    if FAVORITES_PATH.exists():
+        data = json.loads(FAVORITES_PATH.read_text(encoding="utf-8"))
+        return set(data.get("favorites", []))
+    return set()
+
+
+def save_favorites(favs: set) -> None:
+    FAVORITES_PATH.write_text(
+        json.dumps({"favorites": sorted(favs)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+if "favorites" not in st.session_state:
+    st.session_state.favorites = load_favorites()
+
+
 # ─── チャート生成 ─────────────────────────────────────────────────
 def make_chart(df: pd.DataFrame, name: str) -> go.Figure:
     fig = make_subplots(
@@ -114,7 +151,6 @@ def make_chart(df: pd.DataFrame, name: str) -> go.Figure:
         vertical_spacing=0.03,
         subplot_titles=("価格・移動平均", "RSI", "出来高比"),
     )
-    # 価格
     fig.add_trace(go.Scatter(
         x=df["fetched_at"], y=df["price"],
         name="現在値", line=dict(color="#00d4ff", width=2)
@@ -127,7 +163,6 @@ def make_chart(df: pd.DataFrame, name: str) -> go.Figure:
                 name=col.upper(), line=dict(color=color, width=1, dash=dash), opacity=0.8
             ), row=1, col=1)
 
-    # RSI
     rsi_valid = df["rsi"].notna()
     fig.add_trace(go.Scatter(
         x=df["fetched_at"][rsi_valid], y=df["rsi"][rsi_valid],
@@ -137,12 +172,11 @@ def make_chart(df: pd.DataFrame, name: str) -> go.Figure:
     for level, color in [(75, "rgba(255,107,107,0.3)"), (25, "rgba(72,219,251,0.3)")]:
         fig.add_hline(y=level, line_dash="dash", line_color=color, row=2, col=1)
 
-    # 出来高比
     vr = df["volume_ratio"].fillna(0)
-    colors = ["#ff6b6b" if v >= 3 else "#ffd700" if v >= 1.5 else "#4a4a7a" for v in vr]
+    bar_colors = ["#ff6b6b" if v >= 3 else "#ffd700" if v >= 1.5 else "#4a4a7a" for v in vr]
     fig.add_trace(go.Bar(
         x=df["fetched_at"], y=vr, name="出来高比",
-        marker_color=colors, opacity=0.85
+        marker_color=bar_colors, opacity=0.85
     ), row=3, col=1)
     fig.add_hline(y=3.0, line_dash="dash", line_color="rgba(255,107,107,0.5)", row=3, col=1)
 
@@ -164,14 +198,13 @@ def make_chart(df: pd.DataFrame, name: str) -> go.Figure:
 # ─── メイン画面 ───────────────────────────────────────────────────
 st.title("📈 新興市場・小型株モニター")
 
-watchlist = load_watchlist()
-df_latest = load_latest_quotes()
+watchlist    = load_watchlist()
+df_latest    = load_latest_quotes()
 
 if df_latest.empty:
     st.warning("データがありません。monitor.py を実行してデータを蓄積してください。")
     st.stop()
 
-# 最終更新時刻 (JST保存済み)
 if "fetched_at" in df_latest.columns:
     last_update_str = pd.to_datetime(df_latest["fetched_at"].max()).strftime("%Y-%m-%d %H:%M JST")
 else:
@@ -180,15 +213,15 @@ st.caption(f"最終更新: {last_update_str}")
 
 tab1, tab2, tab3 = st.tabs(["📋 ウォッチリスト", "📊 チャート", "🔔 アラート"])
 
-# ─── Tab1: ウォッチリスト表 ───────────────────────────────────────
+# ─── Tab1: ウォッチリスト（カードレイアウト）───────────────────────
 with tab1:
     df_view = df_latest.copy()
-    df_view["銘柄名"] = df_view["ticker"].map(lambda t: watchlist.get(t, {}).get("name", t))
-    df_view["市場"]   = df_view["ticker"].map(lambda t: watchlist.get(t, {}).get("market", "-"))
+    df_view["銘柄名"]   = df_view["ticker"].map(lambda t: watchlist.get(t, {}).get("name", t))
+    df_view["市場"]     = df_view["ticker"].map(lambda t: watchlist.get(t, {}).get("market", "-"))
     df_view["シグナル"] = df_view["signal"].map(lambda s: signal_color(s) + " " + signal_label(s))
-    df_view["前日比%"] = df_view["change_pct"].map(lambda v: f"{v:+.2f}%" if pd.notna(v) else "-")
+    df_view["前日比%"]  = df_view["change_pct"].map(lambda v: f"{v:+.2f}%" if pd.notna(v) else "-")
     df_view["出来高比"] = df_view["volume_ratio"].map(lambda v: f"{v:.1f}x" if pd.notna(v) else "-")
-    df_view["RSI"]    = df_view["rsi"].map(lambda v: f"{v:.0f}" if pd.notna(v) else "-")
+    df_view["RSI"]      = df_view["rsi"].map(lambda v: f"{v:.0f}" if pd.notna(v) else "-")
     df_view["時価総額"] = df_view["market_cap"].map(fmt_cap)
 
     col_filter, col_sort = st.columns([2, 2])
@@ -203,22 +236,58 @@ with tab1:
 
     sort_map = {
         "シグナル順": ("signal", False),
-        "前日比↓": ("change_pct", False),
-        "前日比↑": ("change_pct", True),
+        "前日比↓":   ("change_pct", False),
+        "前日比↑":   ("change_pct", True),
         "出来高比↓": ("volume_ratio", False),
     }
     sk, asc = sort_map[sort_key]
     df_view = df_view.sort_values(sk, ascending=asc, na_position="last")
 
-    display_cols = ["銘柄名", "市場", "price", "前日比%", "出来高比", "RSI", "時価総額", "シグナル"]
-    df_show = df_view[display_cols].rename(columns={"price": "現在値"}).reset_index(drop=True)
-    st.dataframe(df_show, use_container_width=True, height=600)
+    # ── カードレイアウト ───────────────────────────────────────────
+    for _, row in df_view.iterrows():
+        ticker = row["ticker"]
+        is_fav = ticker in st.session_state.favorites
+        code   = ticker.replace(".T", "")
+        price  = row["price"]
+        change = row["前日比%"]
 
-    # サマリーメトリクス
+        price_str = f"¥{price:,.0f}" if pd.notna(price) else "-"
+        if isinstance(change, str) and change.startswith("+"):
+            change_str = f"🟢 {change}"
+        elif isinstance(change, str) and change.startswith("-"):
+            change_str = f"🔴 {change}"
+        else:
+            change_str = change
+
+        with st.container(border=True):
+            c_info, c_fav = st.columns([9, 1])
+            with c_info:
+                st.markdown(
+                    f"**{row['銘柄名']}** `{code}` "
+                    f"<span style='font-size:0.75em;color:#888'>{row['市場']}</span>"
+                    f"&nbsp;&nbsp;{row['シグナル']}",
+                    unsafe_allow_html=True,
+                )
+            with c_fav:
+                btn_label = "⭐" if is_fav else "☆"
+                if st.button(btn_label, key=f"fav_{ticker}", help="お気に入り"):
+                    if is_fav:
+                        st.session_state.favorites.discard(ticker)
+                    else:
+                        st.session_state.favorites.add(ticker)
+                    save_favorites(st.session_state.favorites)
+                    st.rerun()
+
+            st.caption(
+                f"{price_str} · {change_str} · "
+                f"RSI {row['RSI']} · 出来高 {row['出来高比']} · {row['時価総額']}"
+            )
+
+    # ── サマリーメトリクス ─────────────────────────────────────────
     st.markdown("---")
-    buy_n    = (df_latest["signal"].isin(["strong_buy", "buy"])).sum()
-    sell_n   = (df_latest["signal"].isin(["strong_sell", "sell"])).sum()
-    surge_n  = (df_latest["volume_ratio"].fillna(0) >= 3).sum()
+    buy_n   = (df_latest["signal"].isin(["strong_buy", "buy"])).sum()
+    sell_n  = (df_latest["signal"].isin(["strong_sell", "sell"])).sum()
+    surge_n = (df_latest["volume_ratio"].fillna(0) >= 3).sum()
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("総銘柄数", len(df_latest))
     c2.metric("買いシグナル", buy_n)
@@ -227,12 +296,33 @@ with tab1:
 
 # ─── Tab2: チャート ───────────────────────────────────────────────
 with tab2:
-    ticker_options = {
-        f"{watchlist.get(t, {}).get('name', t)} ({t})": t
-        for t in df_latest["ticker"].tolist()
-    }
-    sel_label = st.selectbox("銘柄を選択", list(ticker_options.keys()))
-    sel_ticker = ticker_options[sel_label]
+    ticker_list   = df_latest["ticker"].tolist()
+    ticker_labels = [
+        f"{watchlist.get(t, {}).get('name', t)} ({t.replace('.T', '')})"
+        for t in ticker_list
+    ]
+    label_to_ticker = dict(zip(ticker_labels, ticker_list))
+
+    # ── お気に入りクイックアクセス ─────────────────────────────────
+    fav_in_list = [t for t in sorted(st.session_state.favorites) if t in ticker_list]
+    if fav_in_list:
+        st.markdown("**⭐ お気に入り（ワンタップで表示）**")
+        n_cols = min(len(fav_in_list), 3)
+        for i in range(0, len(fav_in_list), n_cols):
+            chunk = fav_in_list[i : i + n_cols]
+            btn_cols = st.columns(n_cols)
+            for j, ft in enumerate(chunk):
+                fn = watchlist.get(ft, {}).get("name", ft)
+                with btn_cols[j]:
+                    target_label = f"{fn} ({ft.replace('.T', '')})"
+                    if st.button(fn, key=f"quick_{ft}", use_container_width=True):
+                        st.session_state["chart_select"] = target_label
+        st.divider()
+
+    # ── 銘柄選択 ───────────────────────────────────────────────────
+    sel_label  = st.selectbox("銘柄を選択", ticker_labels, key="chart_select")
+    sel_ticker = label_to_ticker.get(sel_label, ticker_list[0])
+
     days_opt = st.slider("表示期間（日）", min_value=1, max_value=90, value=30)
 
     df_hist = load_ticker_history(sel_ticker, days=days_opt)
@@ -240,8 +330,20 @@ with tab2:
         st.info(f"データ蓄積中です（現在 {len(df_hist)} 件）。しばらく monitor.py を実行してください。")
     else:
         name = watchlist.get(sel_ticker, {}).get("name", sel_ticker)
-        fig = make_chart(df_hist, f"{name} ({sel_ticker})")
+        fig  = make_chart(df_hist, f"{name} ({sel_ticker})")
         st.plotly_chart(fig, use_container_width=True)
+
+        # チャート画面でもお気に入りトグル
+        is_fav    = sel_ticker in st.session_state.favorites
+        fav_label = "⭐ お気に入りから削除" if is_fav else "☆ お気に入りに追加"
+        if st.button(fav_label, key="chart_fav_toggle"):
+            if is_fav:
+                st.session_state.favorites.discard(sel_ticker)
+            else:
+                st.session_state.favorites.add(sel_ticker)
+            save_favorites(st.session_state.favorites)
+            st.rerun()
+
         st.caption(f"{len(df_hist)} 件のデータ")
 
 # ─── Tab3: アラート ───────────────────────────────────────────────
