@@ -2,6 +2,16 @@ name: Stock Monitor Bot
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: '実行モード (intraday=場中アラート / daily=夜間レポート / none=通知なし)'
+        required: false
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - intraday
+          - daily
 
 permissions:
   contents: write
@@ -27,7 +37,16 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run stock monitor
-        run: python monitor.py
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
+        run: |
+          MODE="${{ inputs.mode }}"
+          if [ "$MODE" = "none" ] || [ -z "$MODE" ]; then
+            python monitor.py
+          else
+            python monitor.py --mode "$MODE"
+          fi
 
       - name: Commit and push updated data.db
         run: |
