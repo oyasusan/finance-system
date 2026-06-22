@@ -2,15 +2,6 @@ name: Stock Monitor Bot
 
 on:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: '実行モード (intraday=場中 / daily=夜間)'
-        required: false
-        default: 'intraday'
-        type: choice
-        options:
-          - intraday
-          - daily
 
 permissions:
   contents: write
@@ -35,29 +26,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Determine mode from schedule time
-        id: mode
-        run: |
-          # workflow_dispatch の場合は手動指定を優先
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "mode=${{ inputs.mode }}" >> $GITHUB_OUTPUT
-          else
-            HOUR=$(date -u +%H)
-            # UTC 10:00 (JST 19:00) は夜間モード、それ以外は場中モード
-            if [ "$HOUR" -ge 10 ]; then
-              echo "mode=daily" >> $GITHUB_OUTPUT
-            else
-              echo "mode=intraday" >> $GITHUB_OUTPUT
-            fi
-          fi
-
       - name: Run stock monitor
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
-        run: |
-          echo "Running in mode: ${{ steps.mode.outputs.mode }}"
-          python monitor.py --mode ${{ steps.mode.outputs.mode }}
+        run: python monitor.py
 
       - name: Commit and push updated data.db
         run: |
