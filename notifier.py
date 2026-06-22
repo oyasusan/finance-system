@@ -141,6 +141,9 @@ def notify_intraday(entries: list[dict]) -> int:
     当日に同シグナルレベル以下の通知済み銘柄はスキップし、
     レベル昇格または方向転換（買い⇔売り）のときのみ再通知する。
     """
+    if not ALERT_WEBHOOK_URL:
+        print("[notifier] SLACK_ALERT_WEBHOOK_URL が未設定のため場中アラートをスキップ")
+        return 0
     today = datetime.now(JST).strftime("%Y-%m-%d")
     state = _load_alert_state(today)
     sent  = state["sent"]

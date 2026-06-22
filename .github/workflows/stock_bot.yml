@@ -53,6 +53,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data.db
+          git add alert_state.json 2>/dev/null || true
           # 変更がない場合はコミットしない
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "chore: update stock data $(date -u +'%Y-%m-%d %H:%M UTC') [skip ci]"
