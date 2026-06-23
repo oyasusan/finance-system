@@ -125,6 +125,11 @@ def fmt_cap(v) -> str:
 
 # ─── お気に入り管理 ────────────────────────────────────────────────
 def load_favorites() -> set:
+    # クラウド環境: URLクエリパラメータを優先（ブックマークで永続化）
+    favs_param = st.query_params.get("favs", "")
+    if favs_param:
+        return set(t for t in favs_param.split(",") if t)
+    # ローカル環境: ファイルから読み込み
     if FAVORITES_PATH.exists():
         data = json.loads(FAVORITES_PATH.read_text(encoding="utf-8"))
         return set(data.get("favorites", []))
@@ -132,10 +137,19 @@ def load_favorites() -> set:
 
 
 def save_favorites(favs: set) -> None:
-    FAVORITES_PATH.write_text(
-        json.dumps({"favorites": sorted(favs)}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    # URLクエリパラメータを更新（クラウド・ローカル共通）
+    if favs:
+        st.query_params["favs"] = ",".join(sorted(favs))
+    elif "favs" in st.query_params:
+        del st.query_params["favs"]
+    # ローカル環境: ファイルにも保存
+    try:
+        FAVORITES_PATH.write_text(
+            json.dumps({"favorites": sorted(favs)}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass  # クラウドではファイル書き込み不可のため無視
 
 
 if "favorites" not in st.session_state:

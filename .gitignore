@@ -26,3 +26,6 @@ Thumbs.db
 # ローカル設定
 *.local
 .env
+
+# お気に入り（個人データ・クラウドはURLパラメータで管理）
+favorites.json
