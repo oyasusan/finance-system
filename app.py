@@ -43,6 +43,18 @@ h1 { font-size: 1.4rem !important; white-space: normal !important; word-break: b
     border: 1px solid #444466 !important;
     border-radius: 6px !important;
 }
+/* タブ切替（ラジオボタンをタブ風に） */
+div[role="radiogroup"] {
+    gap: 4px;
+    border-bottom: 1px solid #333355;
+    padding-bottom: 6px;
+}
+div[role="radiogroup"] label {
+    border: 1px solid #333355 !important;
+    border-radius: 8px 8px 0 0 !important;
+    padding: 4px 12px !important;
+    background: #1a1a2e;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -225,10 +237,41 @@ else:
     last_update_str = "-"
 st.caption(f"最終更新: {last_update_str}")
 
-tab1, tab2, tab3 = st.tabs(["📋 ウォッチリスト", "📊 チャート", "🔔 アラート"])
+# ── 銘柄ラベル（チャートタブの選択肢・ショートカット共通で使用）─────
+ticker_list     = df_latest["ticker"].tolist()
+ticker_labels   = [
+    f"{watchlist.get(t, {}).get('name', t)} ({t.replace('.T', '')})"
+    for t in ticker_list
+]
+label_to_ticker = dict(zip(ticker_labels, ticker_list))
+ticker_to_label = dict(zip(ticker_list, ticker_labels))
 
-# ─── Tab1: ウォッチリスト（カードレイアウト）───────────────────────
-with tab1:
+
+def _goto_chart(ticker: str) -> None:
+    """指定銘柄のチャートタブへジャンプする"""
+    label = ticker_to_label.get(ticker)
+    if label:
+        st.session_state["chart_select"] = label
+    # "active_tab" は st.radio のwidgetキーのため、instantiate 済みの
+    # 同一run内では直接上書きできない。次run開始時に反映する専用キー経由で切り替える。
+    st.session_state["nav_request"] = TAB_CHART
+    st.rerun()
+
+
+# ─── タブ切替（st.tabs はプログラムからの切替不可のため st.radio で自作）───
+TAB_WATCHLIST, TAB_CHART, TAB_ALERT = "📋 ウォッチリスト", "📊 チャート", "🔔 アラート"
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = TAB_WATCHLIST
+if "nav_request" in st.session_state:
+    st.session_state.active_tab = st.session_state.pop("nav_request")
+
+active_tab = st.radio(
+    "表示切替", [TAB_WATCHLIST, TAB_CHART, TAB_ALERT],
+    key="active_tab", horizontal=True, label_visibility="collapsed",
+)
+
+# ─── ウォッチリスト（カードレイアウト）─────────────────────────────
+if active_tab == TAB_WATCHLIST:
     df_view = df_latest.copy()
     df_view["銘柄名"]   = df_view["ticker"].map(lambda t: watchlist.get(t, {}).get("name", t))
     df_view["市場"]     = df_view["ticker"].map(lambda t: watchlist.get(t, {}).get("market", "-"))
@@ -274,7 +317,7 @@ with tab1:
             change_str = change
 
         with st.container(border=True):
-            c_info, c_fav = st.columns([9, 1])
+            c_info, c_chart, c_fav = st.columns([8, 1, 1])
             with c_info:
                 st.markdown(
                     f"**{row['銘柄名']}** `{code}` "
@@ -282,6 +325,9 @@ with tab1:
                     f"&nbsp;&nbsp;{row['シグナル']}",
                     unsafe_allow_html=True,
                 )
+            with c_chart:
+                if st.button("📊", key=f"wl_chart_{ticker}", help="チャートを見る"):
+                    _goto_chart(ticker)
             with c_fav:
                 btn_label = "⭐" if is_fav else "☆"
                 if st.button(btn_label, key=f"fav_{ticker}", help="お気に入り"):
@@ -310,15 +356,8 @@ with tab1:
     c3.metric("売りシグナル", sell_n)
     c4.metric("出来高3倍超", surge_n)
 
-# ─── Tab2: チャート ───────────────────────────────────────────────
-with tab2:
-    ticker_list   = df_latest["ticker"].tolist()
-    ticker_labels = [
-        f"{watchlist.get(t, {}).get('name', t)} ({t.replace('.T', '')})"
-        for t in ticker_list
-    ]
-    label_to_ticker = dict(zip(ticker_labels, ticker_list))
-
+# ─── チャート ─────────────────────────────────────────────────────
+elif active_tab == TAB_CHART:
     # ── お気に入りクイックアクセス ─────────────────────────────────
     fav_in_list = [t for t in sorted(st.session_state.favorites) if t in ticker_list]
     if fav_in_list:
@@ -362,8 +401,8 @@ with tab2:
 
         st.caption(f"{len(df_hist)} 件のデータ")
 
-# ─── Tab3: アラート ───────────────────────────────────────────────
-with tab3:
+# ─── アラート ─────────────────────────────────────────────────────
+elif active_tab == TAB_ALERT:
     alert_df = df_latest[df_latest["signal"].isin(["strong_buy", "buy", "strong_sell", "sell"])].copy()
     if alert_df.empty:
         st.info("現在アクティブなシグナルはありません。")
@@ -374,10 +413,13 @@ with tab3:
         alert_df["シグナル"] = alert_df["signal"].map(lambda s: signal_color(s) + " " + signal_label(s))
 
         for _, row in alert_df.sort_values("signal").iterrows():
+            ticker = row["ticker"]
             with st.container():
-                col_a, col_b = st.columns([3, 2])
-                col_a.markdown(f"**{row['銘柄名']}** `{row['ticker'].replace('.T','')}`  {row['シグナル']}")
+                col_a, col_b, col_c = st.columns([3, 2, 1])
+                col_a.markdown(f"**{row['銘柄名']}** `{ticker.replace('.T','')}`  {row['シグナル']}")
                 col_b.markdown(f"前日比 **{row['前日比%']}** | 出来高 **{row['出来高比']}** | RSI `{row['rsi']:.0f}`" if pd.notna(row.get('rsi')) else "")
+                if col_c.button("📊 チャート", key=f"alert_chart_{ticker}"):
+                    _goto_chart(ticker)
                 if row.get("reasons"):
                     try:
                         reasons = json.loads(row["reasons"])
