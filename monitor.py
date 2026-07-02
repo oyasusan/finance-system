@@ -23,6 +23,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, BarColumn, MofNCompleteColumn, TextColumn
 from rich import box
 
+from ai_commentary import annotate_entries
 from fetcher import fetch_quote, fetch_history, calc_rsi, calc_moving_averages
 from screener import evaluate, Signal
 from storage import save_entries, stats as db_stats
@@ -212,6 +213,7 @@ def fetch_all(cfg: dict, max_workers: int = 8) -> list[dict]:
 def run_once(cfg: dict, screener_mode: bool = False, notify_mode: str | None = None):
     start = datetime.now()
     entries = fetch_all(cfg)
+    ai_n = annotate_entries(entries)
     elapsed = (datetime.now() - start).seconds
 
     console.clear()
@@ -223,9 +225,10 @@ def run_once(cfg: dict, screener_mode: bool = False, notify_mode: str | None = N
         sig = e.get("signal")
         if sig and sig.level in ("strong_buy", "strong_sell") and sig.reasons:
             color = "bright_green" if sig.level == "strong_buy" else "bright_red"
-            alerts_text.append(
-                f"[{color}]{e.get('name', e['ticker'])}[/{color}]: " + "、".join(sig.reasons)
-            )
+            line = f"[{color}]{e.get('name', e['ticker'])}[/{color}]: " + "、".join(sig.reasons)
+            if e.get("ai_comment"):
+                line += f"\n  🤖 {e['ai_comment']}"
+            alerts_text.append(line)
     if alerts_text:
         console.print(Panel("\n".join(alerts_text), title="[bold yellow]アラート[/bold yellow]", border_style="yellow"))
 
@@ -242,9 +245,10 @@ def run_once(cfg: dict, screener_mode: bool = False, notify_mode: str | None = N
     ok = sum(1 for e in entries if "error" not in e)
     ng = len(entries) - ok
     ng_str = f" / [red]失敗{ng}[/red]" if ng else ""
+    ai_str = f"  [dim]AIコメント{ai_n}件[/dim]" if ai_n else ""
     console.print(
         f"\n  最終更新: [dim]{start.strftime('%Y-%m-%d %H:%M:%S')}[/dim]"
-        f"  取得{ok}銘柄{ng_str}  [dim]({elapsed}秒)[/dim]  [dim]DB保存済[/dim]{notif_str}"
+        f"  取得{ok}銘柄{ng_str}  [dim]({elapsed}秒)[/dim]  [dim]DB保存済[/dim]{notif_str}{ai_str}"
     )
     return entries
 

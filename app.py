@@ -296,6 +296,8 @@ with tab1:
                 f"{price_str} · {change_str} · "
                 f"RSI {row['RSI']} · 出来高 {row['出来高比']} · {row['時価総額']}"
             )
+            if row.get("ai_comment") and pd.notna(row["ai_comment"]):
+                st.caption(f"🤖 {row['ai_comment']}")
 
     # ── サマリーメトリクス ─────────────────────────────────────────
     st.markdown("---")
@@ -382,4 +384,6 @@ with tab3:
                         st.caption("　" + " / ".join(reasons))
                     except Exception:
                         pass
+                if row.get("ai_comment") and pd.notna(row["ai_comment"]):
+                    st.caption(f"　🤖 {row['ai_comment']}")
                 st.markdown("---")

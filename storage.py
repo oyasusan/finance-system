@@ -32,12 +32,17 @@ def init_db():
                 market_cap   INTEGER,
                 per          REAL,
                 signal       TEXT,
-                reasons      TEXT
+                reasons      TEXT,
+                ai_comment   TEXT
             )
         """)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_ticker_time ON quotes(ticker, fetched_at)"
         )
+        try:
+            conn.execute("ALTER TABLE quotes ADD COLUMN ai_comment TEXT")
+        except sqlite3.OperationalError:
+            pass  # 既存DBに列が既にある場合
 
 
 def save_entries(entries: list[dict]):
@@ -57,6 +62,7 @@ def save_entries(entries: list[dict]):
             e.get("market_cap"), e.get("per"),
             sig.level if sig else None,
             json.dumps(sig.reasons, ensure_ascii=False) if sig else None,
+            e.get("ai_comment"),
         ))
     if not rows:
         return
@@ -64,8 +70,8 @@ def save_entries(entries: list[dict]):
         conn.executemany("""
             INSERT INTO quotes
                 (ticker, fetched_at, price, change_pct, volume_ratio,
-                 rsi, ma5, ma25, ma75, market_cap, per, signal, reasons)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 rsi, ma5, ma25, ma75, market_cap, per, signal, reasons, ai_comment)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, rows)
 
 
